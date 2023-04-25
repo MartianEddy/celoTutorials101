@@ -169,7 +169,7 @@ contract ComputerMarketplace {
     uint internal maxProductsPerUser = 10;
 
     event ProductCreated(address indexed owner, string computer_title, string image_url, string computer_specs, string store_location, uint price);
-    event ProductDeleted(address indexed owner, string computer_title, string image_url);
+    event ProductDeleted(uint indexed productId);
 
     function setMaxProductsPerUser(uint _maxProductsPerUser) public {
         require(
@@ -243,39 +243,42 @@ contract ComputerMarketplace {
     }
 
     function buyProduct(uint _index) public payable nonReentrant {
+        require(_index < products.length, "Invalid product index");
+        Product storage product = products[_index];
+    
+    require(msg.value >= product.price, "Insufficient funds");
         require(
             IERC20Token(celoTokenAddress).transferFrom(
                 msg.sender,
-                products[_index].owner,
-                products[_index].price
+                product.owner,
+                product.price
             ),
             "Transfer failed."
         );
         products[_index].sold++;
     }
 
-    function deleteProduct(uint _index) public {
-        require(_index < productsLength, "Product index out of range");
+    function deleteProduct(uint256 _index) public {
+    require(products.length > 0 && _index < products.length, "Invalid product index");
 
-        // Make sure that the caller is the owner of the product
-        require(
-            products[_index].owner == msg.sender,
-            "Only the owner can delete their products"
-        );
+    address owner = products[_index].owner;
+    require(owner == msg.sender, "Only the owner can delete the product");
 
-        // Delete the product at the specified index
-        for (uint i = _index; i < productsLength - 1; i++) {
-            products[i] = products[i + 1];
-        }
-        delete products[productsLength - 1];
-        productsLength--;
+    // Update productsByUser mapping
+    uint256 productId = products[_index].id;
+    delete productsByUser[owner][productId];
 
-        // Update the product count for the owner
-        productsByUser[msg.sender]--;
+    // Swap the product to delete with the last product
+    uint256 lastProductIndex = products.length - 1;
+    Product storage lastProduct = products[lastProductIndex];
+    products[_index] = lastProduct;
 
-         emit ProductDeleted(products[_index].owner, products[_index].computer_title, products[_index].image_url);
+    // Remove the last product from the array
+    products.pop();
+    
+    emit ProductDeleted(productId);
+}
 
-    }
 
     function getProductsByUser(
         address _user
@@ -304,6 +307,7 @@ contract ComputerMarketplace {
     }
 
 }
+
 
 ```
 
