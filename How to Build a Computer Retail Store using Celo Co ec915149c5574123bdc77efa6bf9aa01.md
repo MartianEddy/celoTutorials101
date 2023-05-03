@@ -173,9 +173,13 @@ contract ComputerMarketplace {
 
     // Event that is emitted when a new product is created
     event ProductCreated(address indexed owner, string computer_title, string image_url, string computer_specs, string store_location, uint price);
+ main
 
     // Event that is emitted when a product is deleted
     event ProductDeleted(address indexed owner, string computer_title, string image_url);
+=======
+    event ProductDeleted(uint indexed productId);
+    main
 
     // Function to set the maximum number of products a user can create
     function setMaxProductsPerUser(uint _maxProductsPerUser) public {
@@ -249,39 +253,42 @@ contract ComputerMarketplace {
     }
 
     function buyProduct(uint _index) public payable nonReentrant {
+        require(_index < products.length, "Invalid product index");
+        Product storage product = products[_index];
+    
+    require(msg.value >= product.price, "Insufficient funds");
         require(
             IERC20Token(celoTokenAddress).transferFrom(
                 msg.sender,
-                products[_index].owner,
-                products[_index].price
+                product.owner,
+                product.price
             ),
             "Transfer failed."
         );
         products[_index].sold++;
     }
 
-    function deleteProduct(uint _index) public {
-        require(_index < productsLength, "Product index out of range");
+    function deleteProduct(uint256 _index) public {
+    require(products.length > 0 && _index < products.length, "Invalid product index");
 
-        // Make sure that the caller is the owner of the product
-        require(
-            products[_index].owner == msg.sender,
-            "Only the owner can delete their products"
-        );
+    address owner = products[_index].owner;
+    require(owner == msg.sender, "Only the owner can delete the product");
 
-        // Delete the product at the specified index
-        for (uint i = _index; i < productsLength - 1; i++) {
-            products[i] = products[i + 1];
-        }
-        delete products[productsLength - 1];
-        productsLength--;
+    // Update productsByUser mapping
+    uint256 productId = products[_index].id;
+    delete productsByUser[owner][productId];
 
-        // Update the product count for the owner
-        productsByUser[msg.sender]--;
+    // Swap the product to delete with the last product
+    uint256 lastProductIndex = products.length - 1;
+    Product storage lastProduct = products[lastProductIndex];
+    products[_index] = lastProduct;
 
-         emit ProductDeleted(products[_index].owner, products[_index].computer_title, products[_index].image_url);
+    // Remove the last product from the array
+    products.pop();
+    
+    emit ProductDeleted(productId);
+}
 
-    }
 
     function getProductsByUser(
         address _user
@@ -310,6 +317,7 @@ contract ComputerMarketplace {
     }
 
 }
+
 
 ```
 
@@ -988,18 +996,24 @@ function App({ Component, pageProps }: AppProps) {
       connectModal={{
         providersOptions: { searchable: true },
       }}
+
     >
       {/* MarketPlaceProvider context provider */}
       <MarketPlaceProvider>
         {/* ShoppingCartProvider context provider */}
         <ShoppingCartProvider>
           {/* Layout component */}
+=======
+    >      
+        <ShoppingCartProvider>
+          <MarketPlaceProvider>
+
           <Layout>
             {/* Render the component passed in as a prop */}
             <Component {...pageProps} />
           </Layout>
+          </MarketPlaceProvider>
         </ShoppingCartProvider>
-      </MarketPlaceProvider>
     </CeloProvider>
   );
 }
@@ -1041,6 +1055,7 @@ export const erc20Abi = erc20Token.abi;
 
 import { Computer, CustomWindow } from "@/typings";
 import { ethers } from "ethers";
+import { useCelo } from "@celo/react-celo";
 import {
   createContext,
   MouseEvent,
@@ -1054,6 +1069,7 @@ import {
   ComputerMarketplaceContract,
   erc20Abi,
 } from "./constants";
+import { useShoppingCart } from "./ShoppingCartContext";
 
 type MarketPlaceProviderProps = {
   children: React.ReactNode;
@@ -1061,9 +1077,6 @@ type MarketPlaceProviderProps = {
 
 type MarketPlaceContextType = {
   getProducts: () => Promise<Computer[]>;
-  fetchContract: (
-    signerOrProvider: ethers.Signer | ethers.providers.Provider
-  ) => ethers.Contract;
   computers: Computer[];
   myProducts: Computer[];
   handleClick: (e: MouseEvent<HTMLButtonElement>) => void;
@@ -1086,22 +1099,17 @@ export default function MarketPlaceProvider({
   const [computers, setComputers] = useState<Computer[]>([]);
   const [myProducts, setMyProducts] = useState<Computer[]>([]);
 
-  const fetchContract = useCallback(
-    (signerOrProvider: ethers.Signer | ethers.providers.Provider) =>
-      new ethers.Contract(
-        ComputerMarketplaceContract,
-        ComputerMarketplaceAbi,
-        signerOrProvider
-      ),
-    []
-  );
+   const { kit, address } = useCelo();
+   const { cartQuantity, cartItems, removeFromCart } = useShoppingCart();
+
+  const router = useRouter();
 
   const getProducts = useCallback(
     async function (): Promise<Computer[]> {
-      const provider = new ethers.providers.JsonRpcProvider(
-        "https://alfajores-forno.celo-testnet.org"
+      const contract = new kit.connection.web3.eth.Contract(
+        ComputerMarketplaceAbi as any,
+        ComputerMarketplaceContract
       );
-      const contract = fetchContract(provider);
 
       const _productsLength = await contract.getProductsLength();
       const _products = [];
@@ -1125,7 +1133,7 @@ export default function MarketPlaceProvider({
       const products = await Promise.all(_products);
       return products as Computer[];
     },
-    [fetchContract]
+    [kit]
   );
 
   useEffect(() => {
@@ -1137,96 +1145,47 @@ export default function MarketPlaceProvider({
     fetchProducts();
   }, [getProducts]);
 
-  const fetchMyProducts = useCallback(async function () {
-    try {
-      const provider = new ethers.providers.Web3Provider(
-        (window as CustomWindow).ethereum
-      );
-      const signer = provider.getSigner();
-      const contract = new ethers.Contract(
-        ComputerMarketplaceContract,
-        ComputerMarketplaceAbi,
-        signer
-      );
-      const accounts = await (window as CustomWindow).ethereum.request({
-        method: "eth_accounts",
-      });
-      const currentUser = accounts[0];
-      const products = await contract.getProductsByUser(currentUser);
-      return products;
-    } catch (err) {
-      console.error(err);
-    }
-  }, []);
-
-  //get my products
+    //get my products
   useEffect(() => {
+    const fetchMyProducts = async function () {
+      try {
+        const contract = new kit.connection.web3.eth.Contract(
+          ComputerMarketplaceAbi as any,
+          ComputerMarketplaceContract
+        );
+        const products = await contract.methods
+          .getProductsByUser(address)
+          .call();
+        return products;
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
     fetchMyProducts().then((data) => {
       setMyProducts(data);
       console.log(data);
     });
-  }, [fetchMyProducts]);
-
-  //define constants
-
-  const getsigner = async () => {
-    if (!(window as CustomWindow).ethereum) {
-      alert("Please install MetaMask to use this feature.");
-      return;
-    }
-
-    await (window as CustomWindow).ethereum.enable();
-    const provider = new ethers.providers.Web3Provider(
-      (window as CustomWindow).ethereum
-    );
-    const signer = provider.getSigner();
-    return signer;
-  };
+  }, [kit, address]);
 
   //define functions
+  // define functions
   async function approvePrice(price: string) {
-    if (!(window as CustomWindow).ethereum) {
-      alert("Please install MetaMask to use this feature.");
+    if (!address) {
+      alert("Please install the Celo Wallet to use this feature.");
       return;
     }
-
-    await (window as CustomWindow).ethereum.enable();
-    const provider = new ethers.providers.Web3Provider(
-      (window as CustomWindow).ethereum
-    );
-    const signer = provider.getSigner();
-    const celoContract = new ethers.Contract(
-      celoContractAddress,
-      erc20Abi,
-      signer
+    const celoContract = new kit.connection.web3.eth.Contract(
+      erc20Abi as any,
+      celoContractAddress
     );
 
-    const result = await celoContract.approve(
-      ComputerMarketplaceContract,
-      price,
-      {
-        from: await signer.getAddress(),
-      }
-    );
-    return result;
+    const txObject = celoContract.methods
+      .approve(ComputerMarketplaceContract, price)
+      .send({ from: address });
+    return txObject;
   }
 
-  async function buyProduct(index: number, price: string) {
-    const signer = await getsigner();
-    const contract = new ethers.Contract(
-      ComputerMarketplaceContract,
-      ComputerMarketplaceAbi,
-      signer
-    );
-
-    try {
-      const tx = await contract.buyProduct(index);
-      await tx.wait();
-      return true;
-    } catch (error: any) {
-      throw new Error(`Purchase failed: ${error.message}`);
-    }
-  }
   // define event handler
   async function handleClick(e: MouseEvent<HTMLButtonElement>) {
     const target = e.target as HTMLDivElement;
@@ -1235,54 +1194,64 @@ export default function MarketPlaceProvider({
     const index: number = parseInt(target.getAttribute("data-index")!);
     const product: Computer = computers[index];
 
-    if (!(window as CustomWindow).ethereum) {
-      alert("Please install MetaMask to use this feature.");
-      return;
-    }
+    const cartItemsPrice = cartItems.reduce((total, cartItem) => {
+      const item = computers.find((i: any) => i.index === cartItem.id);
+      const itemPrice = item ? ethers.utils.formatEther(item.price) : "0";
+      return total + parseFloat(itemPrice) * cartItem.quantity;
+    }, 0);
 
-    // prompt user to approve payment
-    alert(`⌛ Waiting for payment approval for "${product.computer_title}"...`);
+    //console.log("cartItemsPrice", cartItemsPrice);
+
+    const price = ethers.utils.parseEther(cartItemsPrice.toString());
+    const itemPrice = String(price);
+
     try {
-      await approvePrice(product.price);
-    } catch (error: any) {
+      await approvePrice(itemPrice);
+    } catch (error) {
       alert(`⚠️ ${error.message}`);
       return;
     }
 
     // prompt user to confirm purchase
-    const confirmMsg: string = `Are you sure you want to buy "${product.computer_title}" for ${product.price} CELO?`;
+    const confirmMsg: string = `Are you sure you want to buy "${product.computer_title}" for ${itemPrice} CELO?`;
     if (!confirm(confirmMsg)) return;
 
     // process purchase
     alert(`⌛ Processing purchase for "${product.computer_title}"...`);
     try {
-      await buyProduct(index, product.price);
+      const contract = new kit.connection.web3.eth.Contract(
+        ComputerMarketplaceAbi as any,
+        ComputerMarketplaceContract
+      );
+
+      const tx = await contract.methods
+        .buyProduct(product.index)
+        .send({ from: address, value: itemPrice });
+
       alert(`🎉 You successfully bought "${product.computer_title}".`);
+
+      removeFromCart(product.index);
       getProducts();
-    } catch (error: any) {
+    } catch (error) {
       alert(`⚠️ ${error.message}`);
     }
   }
 
   async function deleteProduct(index: number) {
-    const provider = new ethers.providers.Web3Provider(
-      (window as CustomWindow).ethereum
-    );
-    const signer = provider.getSigner();
-    const account = signer.getAddress();
-    const contract = new ethers.Contract(
-      ComputerMarketplaceContract,
-      ComputerMarketplaceAbi,
-      signer
-    );
     try {
-      const tx = await contract.deleteProduct(index);
-      await tx.wait();
+      const contract = new kit.connection.web3.eth.Contract(
+        ComputerMarketplaceAbi as any,
+        ComputerMarketplaceContract
+      );
+      const tx = await contract.methods
+        .deleteProduct(index)
+        .send({ from: address });
       alert("Product deleted successfully");
-      // Refresh the list of my products
 
-      const products = await contract.getProductsByUser(account);
+      // Refresh the list of my products
+      const products = await contract.methods.getProductsByUser(address);
       setMyProducts(products);
+      router.refresh();
     } catch (err) {
       console.error(err);
       alert("Failed to delete product");
@@ -1293,7 +1262,6 @@ export default function MarketPlaceProvider({
     <MarketPlaceContext.Provider
       value={{
         getProducts,
-        fetchContract,
         handleClick,
         computers,
         myProducts,
@@ -1309,10 +1277,13 @@ export default function MarketPlaceProvider({
 
 - **useMarketPlace** hook is used to enable access to the context within the application.
 - **getProducts** function uses the `ethers library` to fetch products from the blockchain and return them as an array of Computer objects. It uses the fetchContract function to create a new contract instance with the provider passed as an argument, reads the number of products from the contract, and iteratively calls the `readProduct` function to retrieve each product from the blockchain. It returns the products as an array of `Computer` objects.
+
 - **fetchMyProducts** function fetches the products added by the currently authenticated user by calling the `getProductsByUser` function of the smart contract. It returns the user’s products as an array of Computer objects.
-- **handleClick** function is an event handler that is triggered when a user clicks the “buy” button on a product card. It gets the product index from the clicked button, calls the `buyProduct` function, and triggers a state update to reflect the new product status.
+
+- **handleClick** function is an event handler that is triggered when a user clicks the "buy" button on a product card. It gets the product index from the clicked button, calls the `buyProduct` function, and triggers a state update to reflect the new product status. `buyProduct` function is called to execute the transaction on the blockchain to buy a product. It receives the product index and the price as arguments, and executes the transaction `kit` which is used to send transactions to the Celo network, by calling the appropriate methods on the smart contract instances. It then returns a boolean value indicating the success of the transaction.
+
 - **approvePrice** function is called when a user approves a transaction by entering their password. It is used to approve the price of the product in the ERC20 contract.
-- **buyProduct** function is called to execute the transaction on the blockchain to buy a product. It receives the product index and the price as arguments, and executes the transaction using the ethers library. It then returns a boolean value indicating the success of the transaction.
+
 - **deleteProduct** function is called to delete a product from the marketplace. It receives the product index as an argument, and updates the state variables accordingly to remove the product from the marketplace.
 
 ### Shoppingcart Context:
@@ -1901,24 +1872,13 @@ export default function ComputerModal() {
     setIsOpen(true);
   }
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    // creates a new instance of the Web3Provider
-    const provider = new ethers.providers.Web3Provider(
-      (window as CustomWindow).ethereum
+    const contract = new kit.connection.web3.eth.Contract(
+      ComputerMarketplaceAbi as any,
+      ComputerMarketplaceContract
     );
-    await provider.send("eth_requestAccounts", []);
-
-    // Create a signer using the provider
-    const signer = provider.getSigner();
-
-    // Fetch the contract instance
-    const contract = fetchContract(provider);
-
-    // Connect the signer to the contract
-    const contractWithSigner = contract.connect(signer);
-    const account = await signer.getAddress();
 
     //Define the transaction parameters
     const params = [
@@ -1927,12 +1887,12 @@ export default function ComputerModal() {
       specs,
       location,
       ethers.utils.parseEther(price),
-
     ];
 
     try {
-      const tx = await contractWithSigner.writeProduct(...params);
-      await tx.wait();
+      const tx = await contract.methods
+        .writeProduct(...params)
+        .send({ from: address });
       setTitle("");
       setImageUrl("");
       setLocation("");
@@ -2105,11 +2065,7 @@ The component allows users to add a computer product to a marketplace using the 
 
 The component defines a state using the `useState hook` to manage the form input fields values and `isOpen` to handle the modal window’s visibility. The component also uses the `useRouter`hook from Next.js to refresh the page when the user successfully adds a new product to the marketplace.
 
-The `handleSubmit` function is called when the form is submitted. It uses the `Web3Provider` from the `ethers` package to interact with the Celo network and create a new instance of a `signer` using the `provider`.
-
-The function fetches the contract instance from the `fetchContract` method defined in the `useMarketPlace` hook, connects the signer to the contract, gets the signer’s address, and defines the transaction parameters using the params array. The `writeProduct` method on the smart contract is called with the params array to add the product to the marketplace.
-
-The component uses the Dialog and Transition components from @headlessui/react to create the modal window that displays the form to the user. The form contains several input fields, including text inputs and a textarea, and a submit button that triggers the `handleSubmit` function.
+The `handleSubmit` function is called when the user submits the form. It constructs a new instance of the `ComputerMarketplace` contract using the `kit.connection.web3.eth.Contract` method, and then calls the `writeProduct` method of the contract, passing in the values of the form fields as parameters. If the transaction is successful, the form fields are cleared and the user is alerted to the success of the transaction. If the transaction fails, an error message is displayed.
 
 ![image-9.png](images/image-9.png)
 
