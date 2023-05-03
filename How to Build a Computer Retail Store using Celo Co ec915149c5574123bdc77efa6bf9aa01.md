@@ -173,13 +173,9 @@ contract ComputerMarketplace {
 
     // Event that is emitted when a new product is created
     event ProductCreated(address indexed owner, string computer_title, string image_url, string computer_specs, string store_location, uint price);
- main
 
     // Event that is emitted when a product is deleted
-    event ProductDeleted(address indexed owner, string computer_title, string image_url);
-=======
     event ProductDeleted(uint indexed productId);
-    main
 
     // Function to set the maximum number of products a user can create
     function setMaxProductsPerUser(uint _maxProductsPerUser) public {
@@ -188,7 +184,7 @@ contract ComputerMarketplace {
     }
 
     // Function to create a new product
-    function writeProduct(
+    function writeProduct
         string memory _computer_title,
         string memory _image_url,
         string memory _computer_specs,
