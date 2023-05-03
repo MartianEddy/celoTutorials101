@@ -9,34 +9,35 @@ This tutorial will guide you through the process of building a computer retail s
 - [How to Build a Computer Retail Store using Celo Composer: A Step-by-Step Guide](#how-to-build-a-computer-retail-store-using-celo-composer-a-step-by-step-guide)
   - [Introduction](#introduction)
   - [Table of Content](#table-of-content)
-  - [Prerequisites](#prerequisites)
+  - [Prerequisites​](#prerequisites)
   - [Tech Stack](#tech-stack)
   - [Celo Composer](#celo-composer)
   - [Getting Started](#getting-started)
   - [Creating our Smart Contract](#creating-our-smart-contract)
   - [Smart Contract breakdown](#smart-contract-breakdown)
-     - [Define an ERC20 Token Contract](#define-an-erc20-token-contract)
-     - [Variables, Structs, Mappings, Modifiers and Events](#variables-structs-mappings-modifiers-and-events)
-     - [Functions](#functions)
-     - [Deploying the smart contract](#deploying-the-smart-contract)
+    - [Define an ERC20 Token Contract](#define-an-erc20-token-contract)
+    - [Variables, Structs, Mappings, Modifiers and Events](#variables-structs-mappings-modifiers-and-events)
+    - [Functions](#functions)
+    - [Deploying the smart contract](#deploying-the-smart-contract)
   - [Building the UI and React Logic](#building-the-ui-and-react-logic)
-     - [Build the Layout Component](#build-the-layout-component)
-     - [Build the Header Component](#build-the-header-component)
-     - [App Page](#app-page)
-     - [MarketPlace Context](#marketPlace-context)
-     - [ShoppingCart Context](#shoppingCart-context)
-     - [Building the Home page](#building-the-home-page)
-     - [Computer Card Component](#computer-card-component)
-     - [Building buy computer functionality](#building-buy-computer-functionality)
-     - [Cart Items Components](#cart-items-components)
-     - [Build my computers page](#build-my-computers-page)
-     - [My Computers Card Component](#my-computers-card-component)
-     - [Create a computer listing](#create-a-computer-listing)
+    - [Build the Layout Component](#build-the-layout-component)
+    - [Build the Header Component](#build-the-header-component)
+    - [App Page](#app-page)
+    - [MarketPlace Context](#marketplace-context)
+    - [Shoppingcart Context](#shoppingcart-context)
+    - [Building the Home page](#building-the-home-page)
+    - [Computer card component](#computer-card-component)
+    - [Building buy computer functionality](#building-buy-computer-functionality)
+    - [Cart Items Components](#cart-items-components)
+    - [Build my computers page](#build-my-computers-page)
+    - [My Computers Card Component](#my-computers-card-component)
+    - [Create a computer listing](#create-a-computer-listing)
   - [Types](#types)
   - [Helper functions](#helper-functions)
   - [Hooks](#hooks)
   - [Push your project on Github](#push-your-project-on-github)
   - [Deploy your application](#deploy-your-application)
+  - [Conclusion​](#conclusion)
   - [Resources](#resources)
 
 ## Prerequisites​
@@ -110,6 +111,7 @@ In the hardhat directory, navigate to contracts and create a new file then name 
 The completed code Should look like this.
 
 ```solidity
+
 
 // SPDX-License-Identifier: MIT
 
@@ -190,7 +192,6 @@ contract ComputerMarketplace {
         require(bytes(_image_url).length > 0, "Image URL cannot be empty");
         require(bytes(_computer_specs).length > 0, "Computer specs cannot be empty");
         require(bytes(_store_location).length > 0, "Store location cannot be empty");
-        require(_price > 0, "Price must be greater than zero");
         require(_price > 0 && _price <= MAX_PRICE, "Invalid product price");
 
         require(
@@ -243,7 +244,7 @@ contract ComputerMarketplace {
     }
 
     function buyProduct(uint _index) public payable nonReentrant {
-        require(_index < products.length, "Invalid product index");
+        require(_index < productsLength, "Invalid product index");
         Product storage product = products[_index];
     
     require(msg.value >= product.price, "Insufficient funds");
@@ -259,24 +260,21 @@ contract ComputerMarketplace {
     }
 
     function deleteProduct(uint256 _index) public {
-    require(products.length > 0 && _index < products.length, "Invalid product index");
+    require(_index < productsLength, "Invalid product index");
 
     address owner = products[_index].owner;
     require(owner == msg.sender, "Only the owner can delete the product");
 
     // Update productsByUser mapping
-    uint256 productId = products[_index].id;
-    delete productsByUser[owner][productId];
+    productsByUser[owner]--;
 
     // Swap the product to delete with the last product
-    uint256 lastProductIndex = products.length - 1;
+    uint256 lastProductIndex = productsLength - 1;
     Product storage lastProduct = products[lastProductIndex];
     products[_index] = lastProduct;
 
-    // Remove the last product from the array
-    products.pop();
     
-    emit ProductDeleted(productId);
+    emit ProductDeleted(_index);
 }
 
 
@@ -307,6 +305,7 @@ contract ComputerMarketplace {
     }
 
 }
+
 
 
 ```
