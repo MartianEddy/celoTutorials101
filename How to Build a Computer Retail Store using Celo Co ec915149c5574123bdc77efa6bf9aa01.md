@@ -9,34 +9,35 @@ This tutorial will guide you through the process of building a computer retail s
 - [How to Build a Computer Retail Store using Celo Composer: A Step-by-Step Guide](#how-to-build-a-computer-retail-store-using-celo-composer-a-step-by-step-guide)
   - [Introduction](#introduction)
   - [Table of Content](#table-of-content)
-  - [Prerequisites](#prerequisites)
+  - [Prerequisites​](#prerequisites)
   - [Tech Stack](#tech-stack)
   - [Celo Composer](#celo-composer)
   - [Getting Started](#getting-started)
   - [Creating our Smart Contract](#creating-our-smart-contract)
   - [Smart Contract breakdown](#smart-contract-breakdown)
-     - [Define an ERC20 Token Contract](#define-an-erc20-token-contract)
-     - [Variables, Structs, Mappings, Modifiers and Events](#variables-structs-mappings-modifiers-and-events)
-     - [Functions](#functions)
-     - [Deploying the smart contract](#deploying-the-smart-contract)
+    - [Define an ERC20 Token Contract](#define-an-erc20-token-contract)
+    - [Variables, Structs, Mappings, Modifiers and Events](#variables-structs-mappings-modifiers-and-events)
+    - [Functions](#functions)
+    - [Deploying the smart contract](#deploying-the-smart-contract)
   - [Building the UI and React Logic](#building-the-ui-and-react-logic)
-     - [Build the Layout Component](#build-the-layout-component)
-     - [Build the Header Component](#build-the-header-component)
-     - [App Page](#app-page)
-     - [MarketPlace Context](#marketPlace-context)
-     - [ShoppingCart Context](#shoppingCart-context)
-     - [Building the Home page](#building-the-home-page)
-     - [Computer Card Component](#computer-card-component)
-     - [Building buy computer functionality](#building-buy-computer-functionality)
-     - [Cart Items Components](#cart-items-components)
-     - [Build my computers page](#build-my-computers-page)
-     - [My Computers Card Component](#my-computers-card-component)
-     - [Create a computer listing](#create-a-computer-listing)
+    - [Build the Layout Component](#build-the-layout-component)
+    - [Build the Header Component](#build-the-header-component)
+    - [App Page](#app-page)
+    - [MarketPlace Context](#marketplace-context)
+    - [Shoppingcart Context](#shoppingcart-context)
+    - [Building the Home page](#building-the-home-page)
+    - [Computer card component](#computer-card-component)
+    - [Building buy computer functionality](#building-buy-computer-functionality)
+    - [Cart Items Components](#cart-items-components)
+    - [Build my computers page](#build-my-computers-page)
+    - [My Computers Card Component](#my-computers-card-component)
+    - [Create a computer listing](#create-a-computer-listing)
   - [Types](#types)
   - [Helper functions](#helper-functions)
   - [Hooks](#hooks)
   - [Push your project on Github](#push-your-project-on-github)
   - [Deploy your application](#deploy-your-application)
+  - [Conclusion​](#conclusion)
   - [Resources](#resources)
 
 ## Prerequisites​
@@ -168,10 +169,18 @@ contract ComputerMarketplace {
 
     uint internal maxProductsPerUser = 10;
 
+    address public admin;
+
     event ProductCreated(address indexed owner, string computer_title, string image_url, string computer_specs, string store_location, uint price);
     event ProductDeleted(uint indexed productId);
 
+
+    constructor(){
+      admin = msg.sender;
+    }
+
     function setMaxProductsPerUser(uint _maxProductsPerUser) public {
+        require(admin == msg.sender, "Unauthorized caller");
         require(
             _maxProductsPerUser > 0,
             "Maximum products per user must be greater than 0"
@@ -190,7 +199,6 @@ contract ComputerMarketplace {
         require(bytes(_image_url).length > 0, "Image URL cannot be empty");
         require(bytes(_computer_specs).length > 0, "Computer specs cannot be empty");
         require(bytes(_store_location).length > 0, "Store location cannot be empty");
-        require(_price > 0, "Price must be greater than zero");
         require(_price > 0 && _price <= MAX_PRICE, "Invalid product price");
 
         require(
@@ -242,60 +250,51 @@ contract ComputerMarketplace {
         );
     }
 
-    function buyProduct(uint _index) public payable nonReentrant {
-        require(_index < products.length, "Invalid product index");
+    function buyProduct(uint _index, uint _amount) public payable nonReentrant {
+        require(_index < productsLength, "Invalid product index");
+        require(_amount > 0, "One product must at least be bought");
         Product storage product = products[_index];
-    
-    require(msg.value >= product.price, "Insufficient funds");
         require(
             IERC20Token(celoTokenAddress).transferFrom(
                 msg.sender,
                 product.owner,
-                product.price
+                product.price * _amount
             ),
             "Transfer failed."
         );
-        products[_index].sold++;
+        products[_index].sold += _amount;
     }
 
     function deleteProduct(uint256 _index) public {
-    require(products.length > 0 && _index < products.length, "Invalid product index");
+    require(_index < productsLength, "Invalid product index");
 
     address owner = products[_index].owner;
     require(owner == msg.sender, "Only the owner can delete the product");
 
     // Update productsByUser mapping
-    uint256 productId = products[_index].id;
-    delete productsByUser[owner][productId];
+    productsByUser[owner]--;
 
     // Swap the product to delete with the last product
-    uint256 lastProductIndex = products.length - 1;
-    Product storage lastProduct = products[lastProductIndex];
-    products[_index] = lastProduct;
-
-    // Remove the last product from the array
-    products.pop();
+    products[_index] = products[productsLength - 1];
+    delete products[_index];
+    productsLength--;
     
-    emit ProductDeleted(productId);
+    emit ProductDeleted(_index);
 }
 
 
     function getProductsByUser(
         address _user
     ) public view returns (Product[] memory) {
-        uint count = 0;
-        for (uint i = 0; i < productsLength; i++) {
-            if (products[i].owner == _user) {
-                count++;
-            }
-        }
+      require(_user != address(0));
 
-        Product[] memory ownedProducts = new Product[](count);
+        Product[] memory ownedProducts = new Product[](productsByUser[_user]);
         uint j = 0;
         for (uint i = 0; i < productsLength; i++) {
             if (products[i].owner == _user) {
                 ownedProducts[j] = products[i];
                 j++;
+                if(j == productsByUser[_user]) break;
             }
         }
 
@@ -307,6 +306,7 @@ contract ComputerMarketplace {
     }
 
 }
+
 
 
 ```
@@ -381,7 +381,7 @@ We will now define some variables, structs and mappings that will be used by our
 
 ```solidity
     uint internal productsLength = 0;
-
+    // address internal cUsdTokenAddress = 0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1;
     address internal celoTokenAddress =
         0xF194afDf50B03e69Bd7D057c1Aa9e10c9954E4C9;
 
@@ -394,7 +394,6 @@ We will now define some variables, structs and mappings that will be used by our
         uint price;
         uint sold;
     }
-
     bool private locked = false;
 
     modifier nonReentrant() {
@@ -410,34 +409,45 @@ We will now define some variables, structs and mappings that will be used by our
 
     mapping(address => uint) internal productsByUser;
 
+    uint internal maxProductsPerUser = 10;
+
+    address public admin;
+
     event ProductCreated(address indexed owner, string computer_title, string image_url, string computer_specs, string store_location, uint price);
-    event ProductDeleted(address indexed owner, string computer_title, string image_url);
+    event ProductDeleted(uint indexed productId);
+
+
+    constructor(){
+      admin = msg.sender;
+    }
 
 ```
 
-- **uint internal productsLength**: declares a variable productsLength with an initial value of 0. It is marked as internal, which means that it can only be accessed from within the contract or contracts that inherit from it.
+- **uint internal productsLength**: declares a variable `productsLength` with an initial value of 0. It is marked as internal, which means that it can only be accessed from within the contract or contracts that inherit from it.
 - **address internal celoTokenAddress**: declares a variable for the celo network native currency which is used to pay for products in our marketplace.
 - **Product**: a struct that defines properties of the marketplace. The fields are:
-    - `owner`: address of the user who owns the product. It is declared as address payable to allow it to receive payments from the buyer.
+    - `owner`: address of the user who owns the product. It is declared as an address payable to allow it to receive payments from the buyer.
     - `computer_title`: name of the product.
     - `image_url`: URL of the product’s image.
     - `computer_specs`: specifications of the product.
     - `store_location`: physical location of the store selling the product.
-    - `price`: price of the product in CELO tokens.
+    - `price`: the price of the product in CELO tokens.
     - `sold`: number of units of the product that have been sold so far.
 - **MAX_PRICE**: defines the maximum allowed values for prices. The requirement statement checks whether the product price is within the valid range.
 - **products**: mapping that stores each product by its index
 - **productsByUser**: mapping that keeps track of how many products each user has added.
-- **maxProductsPerUser**: determines the maximum number of products that a user can write in the ComputerMarketplace contract. By default, it is set to 10 to prevents a user from spamming the platform.
+- **maxProductsPerUser**: determines the maximum number of products that a user can write in the ComputerMarketplace contract. By default, it is set to 10 to prevent a user from spamming the platform.
 - **nonReentrant**: modifier to the buyProduct function to lock the function while it is being executed to prevent a user to call it at the same time and revert it if so.
-- **ProductCreated**: event is emitted when a new product is created in the smart contract. The event has five parameters: the `address of the product owner`, `computer title`, `image URL`, `computer specifications`, `store location`, and `price` of the product. The `indexed` keyword is used to allow for efficient filtering and searching of the event based on its parameters.
-- **ProductDeleted**: event is emitted when an existing product is deleted from the smart contract. The event has three parameters: the `address of the product owner`, `computer title`, and the `image URL`. Both events allow external parties, such as a user interface or another smart contract, to receive notifications when certain actions occur in the smart contract.
+- **admin**: variable storing the address of the deployer that is used to restrict access to admin functionalities.
+- **ProductCreated**: this event is emitted when a new product is created in the smart contract. The event has five parameters: the `address of the product owner`, `computer title`, `image URL`, `computer specifications`, `store location`, and `price` of the product. The `indexed` keyword is used to allow for efficient filtering and searching of the event based on its parameters.
+- **ProductDeleted**: this event is emitted when an existing product is deleted from the smart contract. The event has three parameters: the `address of the product owner`, `computer title`, and the `image URL`. Both events allow external parties, such as a user interface or another smart contract, to receive notifications when certain actions occur in the smart contract.
 
 ### Functions
 
 ```solidity
 
-   function setMaxProductsPerUser(uint _maxProductsPerUser) public {
+    function setMaxProductsPerUser(uint _maxProductsPerUser) public {
+        require(admin == msg.sender, "Unauthorized caller");
         require(
             _maxProductsPerUser > 0,
             "Maximum products per user must be greater than 0"
@@ -447,17 +457,23 @@ We will now define some variables, structs and mappings that will be used by our
 
 ```
 
-`setMaxProductsPerUser` function allows the contract owner to change the maximum number of products a user can create. It takes an unsigned integer _maxProductsPerUser as an argument and sets the maxProductsPerUser variable to the value of the argument. However, the _maxProductsPerUser argument must be greater than 0, and if it is not, the function will fail and return an error message.
+The `setMaxProductsPerUser` function allows the contract owner to change the maximum number of products a user can create. It takes an unsigned integer `_maxProductsPerUser` as an argument and sets the maxProductsPerUser variable to the value of the argument. However, the _maxProductsPerUser argument must be greater than 0, and if it is not, the function will fail and return an error message.
 
 ```solidity
 
- function writeProduct(
+    function writeProduct(
         string memory _computer_title,
         string memory _image_url,
         string memory _computer_specs,
         string memory _store_location,
         uint _price
     ) public {
+        require(bytes(_computer_title).length > 0, "Computer title cannot be empty");
+        require(bytes(_image_url).length > 0, "Image URL cannot be empty");
+        require(bytes(_computer_specs).length > 0, "Computer specs cannot be empty");
+        require(bytes(_store_location).length > 0, "Store location cannot be empty");
+        require(_price > 0 && _price <= MAX_PRICE, "Invalid product price");
+
         require(
             productsByUser[msg.sender] < maxProductsPerUser,
             "Maximum products per user reached"
@@ -476,12 +492,15 @@ We will now define some variables, structs and mappings that will be used by our
 
         productsLength++;
         productsByUser[msg.sender]++;
+
+        emit ProductCreated(msg.sender, _computer_title, _image_url, _computer_specs, _store_location, _price);
+
     }
 ```
 
-`writeProduct` function allows a user to add a new product to the marketplace. The function first checks whether the user has already added the maximum number of products allowed per user (which is set to 10 by default). If the user has not reached the maximum, a new Product struct is created with the provided parameters, and `_sold` is set to 0 since the product has not yet been sold.
+The `writeProduct` function allows a user to add a new product to the marketplace. The function first checks whether the input data received is valid, it then checks whether the user has already added the maximum number of products allowed per user (which is set to 10 by default). If the user has not reached the maximum, a new Product struct is created with the provided parameters, and `_sold` is set to 0 since the product has not yet been sold.
 
-The new product is then added to the products mapping at the `productsLength index`, where `productsLength` is the current number of products in the marketplace. The `owner` of the product is set to the address of the user who called the function, and `productsLength` is incremented. Finally, the `productsByUser` mapping for the user who called the function is incremented, to keep track of the number of products that user has added to the marketplace.
+The new product is then added to the products mapping at the `productsLength index`, where `productsLength` is the current number of products in the marketplace. The `owner` of the product is set to the address of the user who called the function, and `productsLength` is incremented. Finally, the `productsByUser` mapping for the user who called the function is incremented, to keep track of the number of products that the user has added to the marketplace.
 
 ```solidity
 
@@ -513,78 +532,71 @@ The new product is then added to the products mapping at the `productsLength ind
 
 ```
 
-`readProduct` function that takes an index as an argument and returns a tuple of data about the product at that index in the products array.
+`readProduct` function that takes an index as an argument and returns a tuple of data about the product at that index in the `products` mapping.
 
 ```solidity
-   function buyProduct(uint _index) public payable nonReentrant {
+    function buyProduct(uint _index, uint _amount) public payable nonReentrant {
+        require(_index < productsLength, "Invalid product index");
+        require(_amount > 0, "One product must at least be bought");
+        Product storage product = products[_index];
         require(
             IERC20Token(celoTokenAddress).transferFrom(
                 msg.sender,
-                products[_index].owner,
-                products[_index].price
+                product.owner,
+                product.price * _amount
             ),
             "Transfer failed."
         );
-        products[_index].sold++;
+        products[_index].sold += _amount;
     }
 
 ```
 
-`buyProduct` function is used to buy a product from the marketplace. It takes an argument `_index` which is the `index` of the product in the products array that the buyer wants to purchase. The function requires that the buyer sends an amount of CELO tokens that is equal to the price of the product.
+The `buyProduct` function is used to buy a product or many of the same product from the marketplace. It takes two parameters `_index` which is the `index` of the product in the products mapping and `_amount` which is the number of the same product that the buyer wants to purchase. The function requires that the `_index` is valid and that the `_amount` to be purchased is at least one.
 
-The function then uses the `transferFrom` function of the `IERC20Token` interface to transfer the specified amount of CELO tokens from the `buyer's address` to the `owner's address`. If the transfer is successful, the function updates the `sold` variable of the product by incrementing it by 1.
+The function then uses the `transferFrom` function of the `IERC20Token` interface to transfer the specified amount of CELO tokens from the `buyer's address` to the `owner's address`. If the transfer is successful, the function updates the `sold` variable of the product by incrementing it by `_amount`.
 
 ```solidity
 
-   function deleteProduct(uint _index) public {
-        require(_index < productsLength, "Product index out of range");
+    function deleteProduct(uint256 _index) public {
+    require(_index < productsLength, "Invalid product index");
 
-        // Make sure that the caller is the owner of the product
-        require(
-            products[_index].owner == msg.sender,
-            "Only the owner can delete their products"
-        );
+    address owner = products[_index].owner;
+    require(owner == msg.sender, "Only the owner can delete the product");
 
-        // Delete the product at the specified index
-        for (uint i = _index; i < productsLength - 1; i++) {
-            products[i] = products[i + 1];
-        }
-        delete products[productsLength - 1];
-        productsLength--;
+    // Update productsByUser mapping
+    productsByUser[owner]--;
 
-        // Update the product count for the owner
-        productsByUser[msg.sender]--;
-
-         emit ProductDeleted(products[_index].owner, products[_index].computer_title, products[_index].image_url);
-
-    }
+    // Swap the product to delete with the last product
+    products[_index] = products[productsLength - 1];
+    delete products[_index];
+    productsLength--;
+    emit ProductDeleted(_index);
+}
 ```
 
-`deleteProduct` function allows a product owner to delete one of their products from the marketplace. The function takes an input parameter `_index` which represents the `index` of the product in the products array that the owner wants to delete.
+The `deleteProduct` function allows a product's owner to delete one of their products from the marketplace. The function takes an input parameter `_index` which represents the `index` of the product in the products mapping that the owner wants to delete.
 
-The function first checks that the input `index` is within the range of valid indexes for the products array. It then checks that the caller of the function is the `owner` of the product they want to delete.
+The function first checks that the input `index` is within the range of valid indexes for the products mapping. It then checks that the caller of the function is the `owner` of the product they want to delete.
 
-If both conditions are satisfied, the function proceeds to delete the product at the specified index. To do this, it shifts all products after the specified index one position to the left, effectively overwriting the product at the index being deleted. Finally, it deletes the last element of the array (which is now a duplicate of the product at the second-to-last index) and decrements the `productsLength` variable to reflect the new length of the products array.
+If both conditions are satisfied, the function proceeds to delete the product at the specified index. To do this, it shifts all products after the specified index one position to the left, effectively overwriting the product at the index being deleted. Finally, it deletes the last element of the mapping (which is now a duplicate of the product at the second-to-last index) and decrements the `productsLength` variable to reflect the new length of the products mapping.
 
 The function also decrements the `productsByUser` mapping for the product `owner` to ensure that their product count is up to date.
 
 ```solidity
-  function getProductsByUser(
+
+    function getProductsByUser(
         address _user
     ) public view returns (Product[] memory) {
-        uint count = 0;
-        for (uint i = 0; i < productsLength; i++) {
-            if (products[i].owner == _user) {
-                count++;
-            }
-        }
+      require(_user != address(0));
 
-        Product[] memory ownedProducts = new Product[](count);
+        Product[] memory ownedProducts = new Product[](productsByUser[_user]);
         uint j = 0;
         for (uint i = 0; i < productsLength; i++) {
             if (products[i].owner == _user) {
                 ownedProducts[j] = products[i];
                 j++;
+                if(j == productsByUser[_user]) break;
             }
         }
 
@@ -592,7 +604,7 @@ The function also decrements the `productsByUser` mapping for the product `owner
     }
 ```
 
-`getProductsByUser` takes an address `_user` as input and returns an array of products that belong to the given user. It loops through all the products and counts the number of products owned by the user. Then it creates a new array `ownedProducts` with the same length as the number of products owned by the user. Finally, it loops through all the products again and adds each product owned by the user to the `ownedProducts` array. It then returns the `ownedProducts` array.
+`getProductsByUser` takes an address `_user` as input and returns an array of products that belong to the given user. It creates a new array `ownedProducts` with the same length as the number of products owned by the user. Finally, it loops through all the products again and adds each product owned by the user to the `ownedProducts` array. It then returns the `ownedProducts` array.
 
 ### Deploying the smart contract
 
